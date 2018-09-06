@@ -179,55 +179,58 @@ func relayWebsocketEvent(result interface{}, event, assetType, exchangeName stri
 func TickerUpdaterRoutine() {
 	log.Println("Starting ticker updater routine.")
 	var wg sync.WaitGroup
+	tick := time.Tick(1000 * time.Millisecond)
 	for {
-		wg.Add(len(bot.exchanges))
-		for x := range bot.exchanges {
-			go func(x int, wg *sync.WaitGroup) {
-				defer wg.Done()
-				if bot.exchanges[x] == nil {
-					return
-				}
-				exchangeName := bot.exchanges[x].GetName()
-				enabledCurrencies := bot.exchanges[x].GetEnabledCurrencies()
-				supportsBatching := bot.exchanges[x].SupportsRESTTickerBatchUpdates()
-				assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
-				if err != nil {
-					log.Printf("failed to get %s exchange asset types. Error: %s",
-						exchangeName, err)
-					return
-				}
-
-				processTicker := func(exch exchange.IBotExchange, update bool, c pair.CurrencyPair, assetType string) {
-					var result ticker.Price
-					var err error
-					if update {
-						result, err = exch.UpdateTicker(c, assetType)
-					} else {
-						result, err = exch.GetTickerPrice(c, assetType)
+		select {
+		case <-tick:
+			wg.Add(len(bot.exchanges))
+			for x := range bot.exchanges {
+				go func(x int, wg *sync.WaitGroup) {
+					defer wg.Done()
+					if bot.exchanges[x] == nil {
+						return
 					}
-					printTickerSummary(result, c, assetType, exchangeName, err)
-					if err == nil {
-						bot.comms.StageTickerData(exchangeName, assetType, result)
-						if bot.config.Webserver.Enabled {
-							relayWebsocketEvent(result, "ticker_update", assetType, exchangeName)
+					exchangeName := bot.exchanges[x].GetName()
+					enabledCurrencies := bot.exchanges[x].GetEnabledCurrencies()
+					supportsBatching := bot.exchanges[x].SupportsRESTTickerBatchUpdates()
+					assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
+					if err != nil {
+						log.Printf("failed to get %s exchange asset types. Error: %s",
+							exchangeName, err)
+						return
+					}
+
+					processTicker := func(exch exchange.IBotExchange, update bool, c pair.CurrencyPair, assetType string) {
+						var result ticker.Price
+						var err error
+						if update {
+							result, err = exch.UpdateTicker(c, assetType)
+						} else {
+							result, err = exch.GetTickerPrice(c, assetType)
+						}
+						printTickerSummary(result, c, assetType, exchangeName, err)
+						if err == nil {
+							bot.comms.StageTickerData(exchangeName, assetType, result)
+							if bot.config.Webserver.Enabled {
+								relayWebsocketEvent(result, "ticker_update", assetType, exchangeName)
+							}
 						}
 					}
-				}
 
-				for y := range assetTypes {
-					for z := range enabledCurrencies {
-						if supportsBatching && z > 0 {
-							processTicker(bot.exchanges[x], false, enabledCurrencies[z], assetTypes[y])
-							continue
+					for y := range assetTypes {
+						for z := range enabledCurrencies {
+							if supportsBatching && z > 0 {
+								processTicker(bot.exchanges[x], false, enabledCurrencies[z], assetTypes[y])
+								continue
+							}
+							processTicker(bot.exchanges[x], true, enabledCurrencies[z], assetTypes[y])
 						}
-						processTicker(bot.exchanges[x], true, enabledCurrencies[z], assetTypes[y])
 					}
-				}
-			}(x, &wg)
+				}(x, &wg)
+			}
+			wg.Wait()
+			log.Println("All enabled currency tickers fetched.")
 		}
-		wg.Wait()
-		log.Println("All enabled currency tickers fetched.")
-		time.Sleep(time.Second * 10)
 	}
 }
 
@@ -236,44 +239,47 @@ func TickerUpdaterRoutine() {
 func OrderbookUpdaterRoutine() {
 	log.Println("Starting orderbook updater routine.")
 	var wg sync.WaitGroup
+	tick := time.Tick(1000 * time.Millisecond)
 	for {
-		wg.Add(len(bot.exchanges))
-		for x := range bot.exchanges {
-			go func(x int, wg *sync.WaitGroup) {
-				defer wg.Done()
+		select {
+		case <-tick:
+			wg.Add(len(bot.exchanges))
+			for x := range bot.exchanges {
+				go func(x int, wg *sync.WaitGroup) {
+					defer wg.Done()
 
-				if bot.exchanges[x] == nil {
-					return
-				}
-				exchangeName := bot.exchanges[x].GetName()
-				enabledCurrencies := bot.exchanges[x].GetEnabledCurrencies()
-				assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
-				if err != nil {
-					log.Printf("failed to get %s exchange asset types. Error: %s",
-						exchangeName, err)
-					return
-				}
+					if bot.exchanges[x] == nil {
+						return
+					}
+					exchangeName := bot.exchanges[x].GetName()
+					enabledCurrencies := bot.exchanges[x].GetEnabledCurrencies()
+					assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
+					if err != nil {
+						log.Printf("failed to get %s exchange asset types. Error: %s",
+							exchangeName, err)
+						return
+					}
 
-				processOrderbook := func(exch exchange.IBotExchange, c pair.CurrencyPair, assetType string) {
-					result, err := exch.UpdateOrderbook(c, assetType)
-					printOrderbookSummary(result, c, assetType, exchangeName, err)
-					if err == nil {
-						bot.comms.StageOrderbookData(exchangeName, assetType, result)
-						if bot.config.Webserver.Enabled {
-							relayWebsocketEvent(result, "orderbook_update", assetType, exchangeName)
+					processOrderbook := func(exch exchange.IBotExchange, c pair.CurrencyPair, assetType string) {
+						result, err := exch.UpdateOrderbook(c, assetType)
+						printOrderbookSummary(result, c, assetType, exchangeName, err)
+						if err == nil {
+							bot.comms.StageOrderbookData(exchangeName, assetType, result)
+							if bot.config.Webserver.Enabled {
+								relayWebsocketEvent(result, "orderbook_update", assetType, exchangeName)
+							}
 						}
 					}
-				}
 
-				for y := range assetTypes {
-					for z := range enabledCurrencies {
-						processOrderbook(bot.exchanges[x], enabledCurrencies[z], assetTypes[y])
+					for y := range assetTypes {
+						for z := range enabledCurrencies {
+							processOrderbook(bot.exchanges[x], enabledCurrencies[z], assetTypes[y])
+						}
 					}
-				}
-			}(x, &wg)
+				}(x, &wg)
+			}
+			wg.Wait()
+			log.Println("All enabled currency orderbooks fetched.")
 		}
-		wg.Wait()
-		log.Println("All enabled currency orderbooks fetched.")
-		time.Sleep(time.Second * 10)
 	}
 }
